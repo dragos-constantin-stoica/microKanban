@@ -1,0 +1,476 @@
+<!DOCTYPE HTML>
+<html>
+    <head>
+		<meta charset="UTF-8">
+    <link rel="stylesheet" href="webix/codebase/webix.css" type="text/css">
+	<!-- CouchDB scripts -->
+	<script src="/_utils/script/json2.js" type="text/javascript"></script>
+    <script src="/_utils/script/sha1.js" type="text/javascript"></script>
+	<script src="/_utils/script/couch.js" type="text/javascript"></script>
+	<script src="/_utils/script/jquery.js" type="text/javascript"></script>
+    <script src="/_utils/script/jquery.couch.js" type="text/javascript"></script>
+    <script src="/_utils/script/jquery.dialog.js" type="text/javascript"></script>    
+	<!-- Webix scripts -->
+    <script src="webix/codebase/webix.js" type="text/javascript"></script> 
+	
+	<style>
+	.custom_item{
+	            width:350px;
+	            border:1px solid #009966;
+	            border-radius:4px;
+	            margin:5px 5px;
+	            overflow:hidden;
+	            padding:5px;
+				float:left;
+	        }
+	.buttons{
+		padding-left: 1px;
+		height: 38px;
+		float:right;
+	}
+	</style>
+	
+	
+	<title>Micro Kanban</title>
+    </head>
+    <body>		
+		
+        <script type="text/javascript" charset="utf-8"> 
+		
+		//$.couch.urlPrefix = "http://localhost:5984";
+		$.couch.urlPrefix = CouchDB.protocol + CouchDB.host;
+		var NEXT_TASK_ID = 1;
+		var INTIAL_STATE = "TODO";
+		
+		var tabledata=[];
+		
+		function getNextTaskId() {
+			var result = 1;
+			for(var i=0; i<tabledata.length; i++){
+				result = Math.max(result, parseInt(tabledata[i].id)+1);
+			}
+			return result;
+		}
+		
+		function filterTableData(list) {
+			var result = [];
+			for(var i=0; i < tabledata.length; i++){
+				if(tabledata[i].status == list) result.push(tabledata[i]);
+			}
+			return result;
+		}
+		
+		
+		//---------------------
+		//Main application loop	
+		webix.ready(function(){
+
+			var FLAG_NEW = false;
+			
+			var taskform = {
+				id: "taskform",
+				view: "form",
+				width: 400,
+				elements:[
+					{view:"text", id:"id", label:"Task #", name:"id", readonly:true},
+					{view:"text", type:"text", id:"title", label:"Title", name:"title", placeholder:"Short title", value:""},
+					{view:"textarea", id:"description", label:"Description",labelPosition:"top", height:350, name:"description", placeholder:"Detailed description of task", value:""},
+					{ view:"combo", id:'status', name:"status", label: 'Status', value:"TODO", yCount:"4", 
+					    options:["TODO", "INPROGRESS", "TESTING", "DONE"]
+					},
+					{cols:[
+			            { view:"button", value:"Save" , type:"form", 
+							click:function(){
+								//This is true when the form is bound to a list
+								if(FLAG_NEW){
+									var whichlist = "TODO";
+									whichlist = $$('taskform').getValues().status;
+									
+									//Save document to CouchDB
+									webix.ajax().header({
+									    "Content-type":"application/json"
+									}).post($.couch.urlPrefix + "/kanban/_design/tasks/_update/update_task", 
+										JSON.stringify({
+									        id:$$('taskform').getValues().id, 
+									        title:$$('taskform').getValues().title,
+											description:$$('taskform').getValues().description,
+											status:$$('taskform').getValues().status
+										}), 
+										function(text, data, xhr){
+									    //response
+									    //console.log(text);
+										//console.log(data.json());
+										//console.log(xhr);
+										var msg = data.json()
+										if('message' in msg){
+											$$(whichlist).add({
+													_rev:xhr.getResponseHeader('X-Couch-Update-NewRev'),
+													_id:xhr.getResponseHeader('X-Couch-Id'),
+											        id:$$('taskform').getValues().id, 
+											        title:$$('taskform').getValues().title,
+													description:$$('taskform').getValues().description,
+													status:$$('taskform').getValues().status
+											    }, 0);
+												NEXT_TASK_ID++;
+											$$("taskform").hide();
+										}
+										
+									});
+								}else{
+									//save to CouchDB and update _rev
+									webix.ajax().header({
+									    "Content-type":"application/json"
+									}).post($.couch.urlPrefix + "/kanban/_design/tasks/_update/update_task/"+$$(INITIAL_STATE).getSelectedItem()["_id"], 
+										JSON.stringify({
+									        title:$$('taskform').getValues().title,
+											description:$$('taskform').getValues().description,
+											status:$$('taskform').getValues().status
+										}), 
+										function(text, data, xhr){
+									    //response
+									    //console.log(text);
+										//console.log(data.json());
+										//console.log(xhr);
+										var msg = data.json()
+										if('message' in msg){
+											
+											//check if status did not changed
+											//delete from previous list and add it to another list
+											var actualstatus = $$('taskform').getValues().status;
+											if(actualstatus !== INITIAL_STATE){
+												$$(actualstatus).add({
+													_id:$$(INITIAL_STATE).getSelectedItem()["_id"],
+													_rev:xhr.getResponseHeader('X-Couch-Update-NewRev'),
+											        id:$$('taskform').getValues().id, 
+											        title:$$('taskform').getValues().title,
+													description:$$('taskform').getValues().description,
+													status:$$('taskform').getValues().status
+												});
+												$$(INITIAL_STATE).remove($$(INITIAL_STATE).getSelectedId());
+											}else{
+												$$("taskform").save();
+												var row = $$(INITIAL_STATE).getItem($$(INITIAL_STATE).getSelectedId());
+												row["_rev"] = xhr.getResponseHeader('X-Couch-Update-NewRev'); 
+												$$(INITIAL_STATE).updateItem($$(INITIAL_STATE).getSelectedId(), row);	
+											}
+											
+											$$("taskform").hide();
+											var uselectlist = "TODO";
+											if($$('TODO').getSelectedId()) $$('TODO').unselectAll();
+											if($$('INPROGRESS').getSelectedId()) $$('INPROGRESS').unselectAll();
+											if($$('TESTING').getSelectedId()) $$('TESTING').unselectAll();
+											if($$('DONE').getSelectedId()) $$('DONE').unselectAll();
+
+										}
+									});
+									
+								}								
+							}
+						},
+			            { view:"button", value:"Cancel", 
+							click:function(){
+								var uselectlist = "TODO";
+								if($$('TODO').getSelectedId()) $$('TODO').unselectAll();
+								if($$('INPROGRESS').getSelectedId()) $$('INPROGRESS').unselectAll();
+								if($$('TESTING').getSelectedId()) $$('TESTING').unselectAll();
+								if($$('DONE').getSelectedId()) $$('DONE').unselectAll();
+			            		$$("taskform").hide();
+								FLAG_NEW=false;
+			            	} 
+						}
+			        ]}
+				]
+			};
+					
+			webix.protoUI({
+			    name:"activeList" //give it some name you like
+			},webix.ui.list, webix.ActiveContent);
+			
+			function deleteClick(id, e) {
+				webix.confirm({
+				    title:"Delete task",
+				    ok:"Yes", 
+				    cancel:"No",
+				    type:"confirm-error",
+				    text:"Do you want to delelete this task?",
+				    callback:function(result){ //setting callback
+						if(result){
+							var whichlist = "TODO";
+				
+							if(id.indexOf("TODO")!= -1) whichlist="TODO";
+							if(id.indexOf("INPROGRESS")!= -1) whichlist="INPROGRESS";
+							if(id.indexOf("TESTING")!= -1) whichlist="TESTING";
+							if(id.indexOf("DONE")!= -1) whichlist="DONE";
+							
+							//Save document to CouchDB
+							var item_id = $$(whichlist).locate(e);
+							var item_data = $$(whichlist).getItem(item_id);
+							
+							webix.ajax().header({
+							    "Content-type":"application/json"
+							}).post($.couch.urlPrefix + "/kanban/_design/tasks/_update/update_task/"+item_data["_id"], 
+								JSON.stringify({
+							        title:item_data.title,
+									description:item_data.description,
+									status:"DELETED"
+								}), 
+								function(text, data, xhr){
+							    //response
+							    //console.log(text);
+								//console.log(data.json());
+								//console.log(xhr);
+								var msg = data.json()
+								if('message' in msg){
+									$$(whichlist).remove(item_id);
+								}
+							});
+						}
+				   }
+				});
+			};
+					
+			function editClick(id, e){
+        		if(!webix.isUndefined($$('taskform')))
+					$$("taskform").hide();
+				var whichlist = "TODO";
+				
+				if(id.indexOf("TODO")!= -1) whichlist="TODO";
+				if(id.indexOf("INPROGRESS")!= -1) whichlist="INPROGRESS";
+				if(id.indexOf("TESTING")!= -1) whichlist="TESTING";
+				if(id.indexOf("DONE")!= -1) whichlist="DONE";
+				
+				webix.ui({
+					view:"window",
+					id:"taskwindow",
+					width:400,
+					position:"top",
+					head:"Task editor",
+					body: webix.copy(taskform)
+				}).show();
+				
+				var item_id = $$(whichlist).locate(e);
+				$$('taskform').bind($$(whichlist));
+				$$(whichlist).select(item_id);
+				INITIAL_STATE = whichlist;
+				FLAG_NEW = false;
+			};
+	
+			function main(){
+				webix.ui({
+					type:"wide",
+					rows:[
+						{ template:"Micro Kanban", height:32 },
+						{
+							cols:[
+								{ 
+								header:"To Do", body:
+									{
+										view:"activeList",
+										id:"TODO",
+										activeContent:{
+										        deleteButtonTODO:{
+										            id:"deleteButtonTODO",
+										            view:"button",
+													type:"iconButton",
+													icon:"trash",
+													width:36,
+													click: deleteClick
+										        },
+										        editButtonTODO:{
+										            id:"editButtonTODO",
+										            view:"button",
+													type:"iconButton",
+													icon:"pencil",
+													width:36,
+													earlyInit:true,
+													click: editClick
+										        }
+										 }, 
+										minWidth:385,
+									 	select: true, 
+									 	template:function(obj,common){
+											var description = obj.description;
+											if(obj.description.length > 120){
+												description = obj.description.substring(0,115) + " ...";
+											}
+	            							return "<div class='custom_item' style='background-color:#D4D4FF;'>"+obj.id+". " +obj.title +
+											       "<br/>"+description+
+										         "<div class='buttons'>"+common.deleteButtonTODO(obj, common)+"</div>"+
+										         "<div class='buttons'>"+common.editButtonTODO(obj, common)+"</div></div>"
+										},
+										type: {
+											height:150
+										},
+										data:"filterTableData('TODO')" 
+									}
+								},
+								{ view:"resizer" },
+								{ 
+								header:"In Progress", body:
+									{
+										view:"activeList",
+										id:"INPROGRESS",
+										activeContent:{
+										        deleteButtonINPROGRESS:{
+										            id:"deleteButtonINPROGRESS",
+										            view:"button",
+													type:"iconButton",
+													icon:"trash",
+													width:36,
+													click: deleteClick
+										        },
+										        editButtonINPROGRESS:{
+										            id:"editButtonINPROGRESS",
+										            view:"button",
+													type:"iconButton",
+													icon:"pencil",
+													width:36,
+													earlyInit:true,
+													click: editClick
+										        }
+										 }, 
+										minWidth:385,
+									 	select: true, 
+									 	template:function(obj,common){
+											var description = obj.description;
+											if(obj.description.length > 120){
+												description = obj.description.substring(0,115) + " ...";
+											}
+	            							return "<div class='custom_item' style='background-color:#FFD699;'>"+obj.id+". " +obj.title +
+											       "<br/>"+description+
+										         "<div class='buttons'>"+common.deleteButtonINPROGRESS(obj, common)+"</div>"+
+										         "<div class='buttons'>"+common.editButtonINPROGRESS(obj, common)+"</div></div>"
+										},
+										type: {
+											height:150
+										},
+										data:"filterTableData('INPROGRESS')" 
+									}
+								},
+								{ view:"resizer" },
+								{ 
+								header:"Testing", body:
+									{
+										view:"activeList",
+										id:"TESTING",
+										activeContent:{
+										        deleteButtonTESTING:{
+										            id:"deleteButtonTESTING",
+										            view:"button",
+													type:"iconButton",
+													icon:"trash",
+													width:36,
+													click: deleteClick
+										        },
+										        editButtonTESTING:{
+										            id:"editButtonTESTING",
+										            view:"button",
+													type:"iconButton",
+													icon:"pencil",
+													width:36,
+													earlyInit:true,
+													click: editClick
+										        }
+										 }, 
+										minWidth:385,
+									 	select: true, 
+									 	template:function(obj,common){
+											var description = obj.description;
+											if(obj.description.length > 120){
+												description = obj.description.substring(0,115) + " ...";
+											}
+	            							return "<div class='custom_item' style='background-color:#99CC00;'>"+obj.id+". " +obj.title +
+											       "<br/>"+description+
+										         "<div class='buttons'>"+common.deleteButtonTESTING(obj, common)+"</div>"+
+										         "<div class='buttons'>"+common.editButtonTESTING(obj, common)+"</div></div>"
+										},
+										type: {
+											height:150
+										},
+										data:"filterTableData('TESTING')" 
+									}
+								},
+								{ view:"resizer" },
+								{ 
+								header:"DONE!", body:
+									{
+										view:"activeList",
+										id:"DONE",
+										activeContent:{
+										        deleteButtonDONE:{
+										            id:"deleteButtonDONE",
+										            view:"button",
+													type:"iconButton",
+													icon:"trash",
+													width:36,
+													click: deleteClick
+										        },
+										        editButtonDONE:{
+										            id:"editButtonDONE",
+										            view:"button",
+													type:"iconButton",
+													icon:"pencil",
+													width:36,
+													earlyInit:true,
+													click: editClick
+										        }
+										 }, 
+										minWidth:385,
+									 	select: true, 
+									 	template:function(obj,common){
+											var description = obj.description;
+											if(obj.description.length > 120){
+												description = obj.description.substring(0,115) + " ...";
+											}
+	            							return "<div class='custom_item' style='background-color:#33CCCC;'>"+obj.id+". " +obj.title +
+											       "<br/>"+description+
+										         "<div class='buttons'>"+common.deleteButtonDONE(obj, common)+"</div>"+
+										         "<div class='buttons'>"+common.editButtonDONE(obj, common)+"</div></div>"
+										},
+										type: {
+											height:150
+										},
+										data:"filterTableData('DONE')" 
+									}
+								}
+							]
+						},
+						{
+							view:"toolbar", height:32,
+							cols:[
+								{ view:"button", type:"iconButton", icon:"plus", label:"New", width:150, 
+									click: function(){
+										webix.ui({
+											view:"window",
+											id:"taskwindow",
+											width:400,
+											position:"top",
+											head:"Task editor",
+											body: webix.copy(taskform)
+										}).show();
+										$$('taskform').setValues({id:NEXT_TASK_ID, status:"TODO"});
+										FLAG_NEW = true;
+									} 
+								}
+							]
+						}
+					]
+				});
+			
+			}//end main
+		
+			//TODO - Load tasks from CouchDB
+			webix.ajax($.couch.urlPrefix + "/kanban/_design/tasks/_list/tabledata/all_tasks/",
+				function(couchdoc){
+					tabledata = JSON.parse(couchdoc);
+					NEXT_TASK_ID = getNextTaskId();
+					main();
+				}
+			);
+		
+		});//end of ready
+		//---------------------
+		
+        </script>
+    </body>
+</html>

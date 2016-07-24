@@ -1,0 +1,4 @@
+{ 
+	"_id": "_design/app_kanban" , 
+	"language":"javascript"
+}
